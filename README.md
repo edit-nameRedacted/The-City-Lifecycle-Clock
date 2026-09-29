@@ -2,7 +2,7 @@
 
 Demo available <a href="https://cityclock-v2-hcv1f.web.app/">here</a>
 
-This is a research and data visualization project on how cities grow organically, and then become more organized over time. 
+This is a research and data visualization project on how cities grow organically, and then become more organized over time. <br>
 The growth patterns are based on analysis of Pre-Haussmann Paris, Prague, Lower New York, and Istanbul, combined with proposed footpath growth pattern algorithms pioneered by <a href="https://www.nature.com/articles/40353">Hebling et al. (1997)</a>. A full write up of the research process can be found in the repo within the <a href="https://github.com/edit-nameRedacted/The-City-Lifecycle-Clock/tree/main/Research%20Document%20of%20Street%20Formation">"Research Documents of Street Formation"</a>  folder. 
 
 ### Constrains of a clock
@@ -22,5 +22,5 @@ The clock 'starts' at 5am with the formation of the city center, following the s
 Included is a tutorial showing how the basic geometry can be generated using only p5.js. The current version of this project, in order to deal with render buffering, requires Node js and local-server to run offline. 
 
 ## Credits
-Ideation, research methods, and implementation design - nameRedacted
+Ideation, research methods, and implementation design - nameRedacted <br>
 Code, map analysis, moral support - Claude Opus 5.5
