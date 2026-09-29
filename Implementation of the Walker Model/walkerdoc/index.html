@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the City Clock Uses the Walker Model</title>
+<style>
+  :root { --bg:#f6f1e6; --fg:#2e2419; --muted:#6b5b48; --rule:#d9ccb4; --code:#ece3d1; --accent:#8a4b2a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1d1a16; --fg:#ece3d3; --muted:#b3a58f; --rule:#3a332a; --code:#2a2520; --accent:#e0a37c; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.65 Georgia, 'Iowan Old Style', 'Times New Roman', serif; }
+  main { max-width:860px; margin:0 auto; padding:40px 22px 90px; }
+  h1 { font-size:2.1em; line-height:1.2; margin:0 0 .3em; }
+  .byline { color:var(--muted); margin:0 0 2em; }
+  h2 { font-size:1.45em; margin:2.2em 0 .5em; color:var(--accent); }
+  h3 { font-size:1.12em; margin:1.6em 0 .4em; }
+  code { font:.86em/1.5 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; background:var(--code); padding:.1em .3em; border-radius:3px; }
+  table { border-collapse:collapse; display:block; overflow-x:auto; margin:1.2em 0; font-size:.92em; }
+  th, td { border-bottom:1px solid var(--rule); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { border-bottom-width:2px; }
+  figure { margin:1.6em 0; }
+  figure img { width:100%; height:auto; border-radius:4px; display:block; }
+  figcaption { color:var(--muted); font-size:.9em; margin-top:.5em; }
+  ul, ol { padding-left:1.3em; }
+  li { margin:.25em 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>How the City Clock Uses the Walker Model</h1>
+<p class="byline">Sep 28, 2026 · AC</p>
+<h2>Overview</h2>
+<p>The city clock runs a port of <code>walker.py</code> (the Stage 3 prototype) as its first hour, then hands growth to rule-based growth for the rest of the day. This document explains that hand-over. It complements <em>Street Networks of Organic City Cores — Research Process</em>, which covers how the walker model was built and scored; here the question is what the clock does with it.</p>
+<p>The clock adds three things the prototype never had to handle:</p>
+<ul>
+<li><strong>A clock face.</strong> One section of the map per hour from 05:00 to 19:00, 60 blocks per section, one block per minute, so the time can be read off the map.</li>
+<li><strong>A real site.</strong> A river, a bridge and a far bank, drawn on a vector base map.</li>
+<li><strong>A whole city.</strong> The prototype grew one old core; the clock grows the core, then organic rings with absorbed villages, then planned districts whose grid follows the local grain.</li>
+</ul>
+<p>The code lives in three files: <code>sim.js</code> (growth), <code>sketch.js</code> (the clock, camera and drawing, in p5.js) and <code>geometry.js</code> (the map's sections, river and bridge). Section and function names below refer to those files.</p>
+<h2>From prototype to clock</h2>
+<p>The clock fits the prototype into a map by fixing a scale, and into a day by giving each hour its own section of land.</p>
+<p><strong>Scale: 4.5 m per map pixel.</strong> At this scale the first section, 05:00, has a radius of about 99 px, or 445 m. That is close to the prototype's whole grown core (0.45 × 1.3 km = 585 m). Its 60 blocks then land near the organic target of about 119 junctions per km². At the 3 m per pixel used earlier in the project, the same 60 blocks would have been more than twice as dense. The walker's parameters are kept in metres (<code>WALK</code>, <code>LANE</code> in <code>sim.js</code>) and converted with <code>CFG.M_PER_PX</code>.</p>
+<p><strong>Time: one section per hour, 05:00 to 19:00.</strong> Each hour grows one section. The day's S-curve (a 20% steady rate plus a logistic, steepest at 13:00) sets each section's land area, not the speed of the clock. The 05:00 core holds 31k px²; 12:00 and 13:00 hold 152k px² each; 18:00 holds 49k px². Most hours are rings around the centre. The far bank is two sections, 10:00 and 15:00, measured from where the bridge lands; the bridge itself is built in the last minute of 09:00. The last three hours are wedges of the outer band, because as rings they would be too thin to hold 60 blocks.</p>
+<figure><img src="images/fig_sections.png" alt="The 14 hourly sections on the base map. Colours only separate neighbouring sections." loading="lazy"><figcaption>The 14 hourly sections on the base map. Colours only separate neighbouring sections.</figcaption></figure>
+
+<p><strong>What each section is given.</strong> A character value <em>t</em> runs from 0 at 05:00 to 1 at 18:00. It sets the targets each section is steered toward, from the organic-core column of the report (entropy 3.02, 11° off square, 11% dead ends, 28% crossroads) toward a planned column. Only the first four hours, <em>t</em> below 0.3, use the walker model.</p>
+<h2>The walker core (05:00)</h2>
+<p>The 05:00 hour runs the round-2 prototype nearly as written: twelve five-minute stages of walking, trails into main streets, settling and lanes, with walls after stages 4 and 8. From minute 9, the clock's rule-based growth also runs, to close loops (see <em>Infill</em> below).</p>
+<h3>Set-up, once per day</h3>
+<p><code>organicSetup()</code> builds everything the walkers need before the first step:</p>
+<ul>
+<li><strong>The trail field.</strong> A grid of 15 m cells covering the first four sections, holding G (worn ground) for equations 1–4. Cells in the river and on the market square are marked so no trail forms there.</li>
+<li><strong>The market</strong> at the city centre, with 12 houses 40–70 m around it. Its edge (a 35 m octagon) is laid as the first street.</li>
+<li><strong>Three villages</strong>, one in each of the 06:00, 07:00 and 08:00 rings, placed 25–70% of the way across the ring and at least 20 px from the river. Each gets 6 houses. They exist from the start, so walkers travel to them long before their section grows.</li>
+<li><strong>Gates</strong>: five roads out of town at roughly even angles, 611 m out (0.47 of the prototype's 1.3 km), plus the bridge's near end. Later organic sections push the gates outward to their own edge.</li>
+</ul>
+<figure><img src="images/fig_stage0.jpg" alt="Stage 0: walkers between houses, market, villages and gates wear the first trails. Purple is worn ground G." loading="lazy"><figcaption>Stage 0: walkers between houses, market, villages and gates wear the first trails. Purple is worn ground G.</figcaption></figure>
+
+<h3>Each stage</h3>
+<p><code>organicStage()</code> repeats walker.py's loop, in its order:</p>
+<ol>
+<li><strong>Link loose lanes</strong> left over from the stage before (<code>connectLanes()</code>, below).</li>
+<li><strong>Walk.</strong> About 800 steps, more in bigger sections. Trips follow walker.py's mix: house → nearest market or village 50%, hub ↔ hub 10%, market ↔ gate 15%, house ↔ house (30–300 m apart) 25%. Each step applies the paper's equations with the prototype's fixes: unit destination pull, trail pull capped at 0.9, wear capped at G_max, paved market.</li>
+<li><strong>Trails into main streets</strong> (<code>trailsToPlans()</code>). Cells worn past the street threshold, inside this section and its growth front, and not already a street, are thinned to one-cell lines, traced, and straightened. Pieces under 30 m with a loose end are dropped. An end that stops just short of a street is carried on to it.</li>
+<li><strong>A wall</strong>, after stages 4 and 8 (<code>buildWall()</code>): nine straight sides at random angles, 10 m beyond the growth front, each corner 0.9–1.1 × that radius. Any side that would touch the river is left out.</li>
+<li><strong>Settle houses</strong> (<code>settle()</code>): 60 per stage in the core, scaled by land in later rings. Each is placed 20–110 m from a worn cell or a street inside the growth front. Placement favours the front, the villages, and (outside the newest wall) the wall's gates.</li>
+</ol>
+<figure><img src="images/fig_trails.jpg" alt="How a trail becomes a street: worn cells, thinned lines, straightened pieces." loading="lazy"><figcaption>How a trail becomes a street: worn cells, thinned lines, straightened pieces.</figcaption></figure>
+
+<h3>Between stages, every second</h3>
+<ul>
+<li><strong>Lanes.</strong> Queued houses get lanes one at a time, spread through the stage (<code>tryLane()</code>). A house more than 40 m from a street gets a straight lane from the nearest street point. The lane leaves near-square to that street (±6° wobble) and has a lognormal length (median 50 m). 90% of lanes run on until they meet a street, up to 200 m; 30% of those carry on across it to the next. A free end snaps to a street within 12 m. Lanes that would run alongside a street, or into the river or past the front, are cut or dropped.</li>
+<li><strong>Linking</strong> (<code>connectLanes()</code>, at each stage's end). A lane that still ends in nothing carries straight on to the next street, or links to one within 40 m.</li>
+<li><strong>Planned streets grow</strong> (<code>runPlans()</code>, <code>stepPlanned()</code>). Trails, walls and lanes are queued as plans and grown three at a time. Each grows straight, point to point. Wherever it crosses a street it makes a junction and carries on, so main streets and walls are never cut short.</li>
+</ul>
+<h3>Infill</h3>
+<p>The walker model alone left 48–60% of the core never enclosed by streets, so the clock could not fill 60 blocks in the hour. From minute 9 (<code>WALK.infillAfter = 0.15</code>), the rule-based spawner also runs in the core. It adds short straight streets, near-square to existing ones, that must end on another street. That closes the loops the lanes leave open.</p>
+<figure><img src="images/fig_core_hour.jpg" alt="The core through its hour, streets coloured by origin. Houses are orange." loading="lazy"><figcaption>The core through its hour, streets coloured by origin. Houses are orange.</figcaption></figure>
+
+<h2>Beyond the core</h2>
+<p>The walker model shapes the first four hours; from 09:00 the city grows by rules, with a grid whose direction is taken from the old city beside it.</p>
+<h3>The organic rings, 06:00–08:00</h3>
+<p>These hours keep the walker's stages: walkers keep walking, trails keep becoming main streets, and houses keep settling and getting lanes. This is where the villages are absorbed. Walkers have travelled to them since 05:00, so the trails between village and market already exist when the ring's hour comes, and the ring grows along them. That matches the absorbed old villages the rings analysis found around real cores.</p>
+<p>On its own the walker model left these rings only 4–14% built, because the prototype only ever grew a core. So the rule-based spawner runs here from the start, alongside the walkers. The walkers supply the main streets, villages and house lanes; the spawner fills in between.</p>
+<figure><img src="images/fig_rings.jpg" alt="09:00: the core and the three organic rings. Villages (blue) sit on main streets that were worn toward them from 05:00." loading="lazy"><figcaption>09:00: the core and the three organic rings. Villages (blue) sit on main streets that were worn toward them from 05:00.</figcaption></figure>
+
+<h3>The planned rings, 09:00 onward</h3>
+<p>From <em>t</em> = 0.3 the walkers stop, and each second the spawner tries to start one straight street. It starts from a point on one of this hour's streets, from a street end left at the section's edge by an earlier hour, or across a T-junction to make a crossroads. A new street must head for another street or the section's edge. It is tilted onto a junction if one is within reach, and is tried out before it grows, so it never cuts off a sliver smaller than a block. As <em>t</em> rises, cul-de-sacs are started on purpose, crossroads get rarer, and junctions squarer. Streets reaching the river stop short; about half of those river ends may be linked by a straight riverside street. The far bank starts at 10:00 from three footpaths at the bridge's far end.</p>
+<h3>The grid follows the local grain</h3>
+<p>The report's round 2 tried to give the core a grain by turning lanes toward the local street direction, and it failed. The clock uses a different idea for the planned rings only: continue the grain the old city has already formed. When a section starts, <code>grainAround()</code> takes every finished street within 60 px (270 m) of it and builds a histogram of their directions modulo 90°, weighted by length, with main streets counting three times. It smooths the histogram over ±6° and takes the peak. New streets are then pulled toward that axis or its perpendicular. The pull ramps from zero at <em>t</em> = 0.2 to full strength at <em>t</em> = 0.55.</p>
+<figure><img src="images/fig_grain.jpg" alt="11:00: streets bordering the section (blue) vote on the grid&#x27;s direction; the peak of their directions sets the axis (red)." loading="lazy"><figcaption>11:00: streets bordering the section (blue) vote on the grid&#x27;s direction; the peak of their directions sets the axis (red).</figcaption></figure>
+
+<p>A peak, not an average, is the point. An earlier version averaged every street direction of the last three sections, which blended the core's many directions into an axis that matched none of them.</p>
+<h2>Blocks and time</h2>
+<p>The hour is the number of finished sections plus five; the minute is the number of shaded blocks in the growing section. Everything below exists to keep that count honest.</p>
+<p><strong>Each hour's share.</strong> Each section's 60 blocks should cover 85% of its land between them, so each block's share is 1/60 of that. Street spacing is set a little finer than the share (60%). There are then enough enclosed areas to choose from, whether the section is a small morning ring or a large midday one. The old core's ratio of segment length to block size (74 m to about 411 px²) carries this into every hour.</p>
+<p><strong>One block a minute</strong> (<code>tickMinute()</code>, <code>fillBlock()</code>). On each minute, blocks are filled until the count equals the minute, up to six at once to catch up. The chosen enclosed area is scored for size, compactness, bordering finished streets, and nearness to where growth started. It then takes in neighbouring empty areas until it holds about its share. When the count is more than two behind, or in the last ten minutes, any shape is accepted.</p>
+<figure><img src="images/fig_minutes.jpg" alt="The 11:00 section filling: blocks shaded early in the hour are yellow, late ones purple. 20 at 11:20, 40 at 11:40, 59 at 11:59." loading="lazy"><figcaption>The 11:00 section filling: blocks shaded early in the hour are yellow, late ones purple. 20 at 11:20, 40 at 11:40, 59 at 11:59.</figcaption></figure>
+
+<p><strong>Keeping growth visible to the end.</strong> A section left alone grows most of its streets in its first ten minutes. Three things spread the motion through the hour:</p>
+<ul>
+<li><strong>Pacing.</strong> Each section gets a street-length budget of 4 × land ÷ block side. It starts with 8 minutes' worth, then refills at 1.4× the average rate, easing to 0.6× by the end. New trails, lanes and spawned streets all spend it.</li>
+<li><strong>Widening.</strong> From 09:00 a main road widens every 2 minutes. A road is a run of streets that carry on within 20° through junctions; the longest in the sampled set is chosen. On screen a glowing tip travels its length over 9 seconds.</li>
+<li><strong>Glowing tips.</strong> Each street takes 6 seconds to grow and shows an amber tip while it does.</li>
+</ul>
+<p><strong>How exact it is.</strong> On two full-day seeds, 27 of 28 hours closed at exactly 60 blocks, and sections ended 51–89% shaded. From 06:00 to 08:00 the count matched the minute every minute. From 09:00 it matched for 48–57 of 59 minutes, at worst 2–7 behind for a moment. The 05:00 core runs up to 11 behind in its first ten minutes, while the first trails form.</p>
+<h2>Departures from walker.py</h2>
+<p>The equations and the round-2 rules are unchanged; what changed is resolution, timing and the jobs the prototype never had to do.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>walker.py</th>
+<th>City clock</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Site</td>
+<td>1.3–1.6 km square, open ground</td>
+<td>Vector base map at 4.5 m/px, with a river and a far bank</td>
+<td>The clock's map</td>
+</tr>
+<tr>
+<td>Trail field</td>
+<td>5 m cells; exp(−r/σ) kernel by FFT convolution every 4 steps</td>
+<td>15 m cells; three box blurs of about 0.9σ approximate the kernel, gradient every 8 steps, regrowth applied every 8 steps</td>
+<td>Speed in the browser, which must also replay a whole day on load</td>
+</tr>
+<tr>
+<td>Growth front</td>
+<td>Linear over 12 stages to 0.45 L</td>
+<td>Linear, reaching the section's edge by stage 9</td>
+<td>Each hour must end built out</td>
+</tr>
+<tr>
+<td>Houses per stage</td>
+<td>25 (the default in code)</td>
+<td>60 in the core, scaled by land in later rings</td>
+<td>Enough lanes to close 60 blocks in an hour</td>
+</tr>
+<tr>
+<td>Trail straightening</td>
+<td>Douglas–Peucker at 6 m (12 m when settling)</td>
+<td>At 12 m or 1.2 cells, whichever is larger</td>
+<td>Coarser cells</td>
+</tr>
+<tr>
+<td>Villages</td>
+<td>3, at 0.28–0.40 L from the centre</td>
+<td>1 in each of the 06:00, 07:00 and 08:00 rings</td>
+<td>Villages are absorbed hour by hour</td>
+</tr>
+<tr>
+<td>Gates</td>
+<td>5, fixed at 0.47 L</td>
+<td>5 roads plus the bridge; pushed out to each organic section's edge</td>
+<td>The city outgrows the prototype's area</td>
+</tr>
+<tr>
+<td>Walls</td>
+<td>After stages 4 and 8</td>
+<td>The same, in the core only; sides touching the river dropped</td>
+<td>The river</td>
+</tr>
+<tr>
+<td>Adding streets</td>
+<td>Whole segments at once</td>
+<td>Grown straight at 15 px/s, junctions made where they cross, paced by a length budget</td>
+<td>Animation, and visible growth through the hour</td>
+</tr>
+<tr>
+<td>Lanes</td>
+<td>From the nearest street</td>
+<td>The same, but may start on an earlier hour's street; clipped to the section and the river</td>
+<td>Hourly sections</td>
+</tr>
+<tr>
+<td>Filling gaps</td>
+<td>None (scored by windows)</td>
+<td>Rule-based infill from minute 9 in the core, all hour in the rings</td>
+<td>48–60% of the core was never enclosed</td>
+</tr>
+<tr>
+<td>Blocks</td>
+<td>Not modelled</td>
+<td>60 per hour, each taking in small neighbours to reach its share</td>
+<td>Telling the time</td>
+</tr>
+</tbody>
+</table>
+<p>The prototype's round-2 grain rule, turning lanes toward the local street direction, is not used in the core. Its only descendant is the planned rings' grid, which takes its direction from the old city beside it.</p>
+<h2>How close it gets</h2>
+<p>The clock's core reads as a walled old town, but by the report's measures it is further from a real organic core than round 2 was: the price of 60 blocks in its hour. Measured on the 05:00 section at 06:00, three seeds:</p>
+<table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>Organic target</th>
+<th>Round 2 prototype</th>
+<th>Clock core</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Junctions per km²</td>
+<td>119</td>
+<td>120</td>
+<td>437–447</td>
+</tr>
+<tr>
+<td>Dead-end share</td>
+<td>11%</td>
+<td>24%</td>
+<td>1–2%</td>
+</tr>
+<tr>
+<td>Orientation entropy</td>
+<td>3.02</td>
+<td>3.32</td>
+<td>3.36–3.50</td>
+</tr>
+<tr>
+<td>Off-square (°)</td>
+<td>11.0</td>
+<td>15.9</td>
+<td>16.7–19.5</td>
+</tr>
+<tr>
+<td>Crossroads share</td>
+<td>28%</td>
+<td>28%</td>
+<td>38–41%</td>
+</tr>
+<tr>
+<td>Circuity</td>
+<td>1.07</td>
+<td>1.09</td>
+<td>1.00</td>
+</tr>
+<tr>
+<td>Median segment (m)</td>
+<td>74</td>
+<td>—</td>
+<td>41–42</td>
+</tr>
+</tbody>
+</table>
+<p>The walker's streets are a minority of the result. In the core at 06:00, walker trails are 18% of the street length, walls and the market square 15%, and house lanes 6%. The other 61% is infill. By 19:00, streets from the walker model are 6% of the city.</p>
+<figure><img src="images/fig_city.jpg" alt="The finished city at 19:00, streets by origin: the walker&#x27;s main streets and walls are concentrated in the core." loading="lazy"><figcaption>The finished city at 19:00, streets by origin: the walker&#x27;s main streets and walls are concentrated in the core.</figcaption></figure>
+
+<p><strong>Known weaknesses</strong></p>
+<ul>
+<li><strong>Too dense.</strong> 60 blocks in the core's 0.63 km² needs about 3.7 times the organic junction density. The only fixes are a bigger 05:00 section or fewer blocks in that hour.</li>
+<li><strong>Too few dead ends.</strong> Infill streets must end on another street, and pruning removes dead ends in the core, where the target says 11%.</li>
+<li><strong>Too little grain in the core.</strong> The report's weakness remains: entropy stays above 3.3 where real cores have 3.02.</li>
+<li><strong>Broken main streets.</strong> Diagonal trails trace as staircases on the 15 m grid, so they straighten into chains of short pieces, not one long street. The trail figure above shows it.</li>
+<li><strong>Perfectly straight streets.</strong> Circuity is exactly 1.00 because every street is one straight segment, a rule of the clock rather than a finding.</li>
+<li><strong>Slow first load.</strong> Replaying a full day takes about 70 seconds in Node; the browser saves the city at each hour so reloads are quick.</li>
+</ul>
+<h2>Code map</h2>
+<p>The walker model lives in section 5 of <code>sim.js</code>; everything else calls into it or runs after it.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Part</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>WALK</code>, <code>LANE</code></td>
+<td>The walker and lane settings, in metres (κ, λ, σ, stages, villages, walls, lane rule)</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>TrailField</code></td>
+<td>The trail field G: <code>run()</code> walks (equations 1–4), <code>gradient()</code> approximates ∇V, <code>trailMask()</code> finds street-worthy cells</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>skeletonLines()</code></td>
+<td>Thins worn cells to one-cell lines and traces them into polylines</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>organicSetup()</code>, <code>organicStart()</code></td>
+<td>Market, houses, villages and gates once a day; each organic section's start</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>organicStage()</code>, <code>organicTick()</code></td>
+<td>One stage (link, walk, trails, wall, settle); per-second lanes and planned streets</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>trip()</code>, <code>settle()</code>, <code>buildWall()</code></td>
+<td>walker.py's trip mix, house settling and walls</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>tryLane()</code>, <code>connectLanes()</code></td>
+<td>The lane rule and end-of-stage linking</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>addPlan()</code>, <code>runPlans()</code>, <code>stepPlanned()</code></td>
+<td>Planned streets grown straight, with junctions where they cross</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>tickSecond()</code>, <code>tryStart()</code>, <code>spawnIsLegal()</code></td>
+<td>Rule-based growth: infill in the organic hours, all growth after</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>grainAround()</code>, <code>align()</code></td>
+<td>The grid direction from bordering streets, and the pull toward it</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>tickMinute()</code>, <code>fillBlock()</code></td>
+<td>One block per minute, merging neighbours to its share</td>
+</tr>
+<tr>
+<td><code>sim.js</code></td>
+<td><code>enterStage()</code></td>
+<td>Each hour's section: character t, block share, street spacing, pacing budget</td>
+</tr>
+<tr>
+<td><code>geometry.js</code></td>
+<td><code>SECTIONS</code>, <code>HOURS</code></td>
+<td>The 14 hourly sections, sized by the S-curve (made by <code>gen_hourly.py</code>)</td>
+</tr>
+<tr>
+<td><code>sketch.js</code></td>
+<td><code>drawLiveCity()</code>, <code>drawSnap()</code></td>
+<td>Glowing tips, afterglow, road widening and snapping animations</td>
+</tr>
+</tbody>
+</table>
+<p>Settings worth trying first: <code>WALK.infillAfter</code> (when infill joins the core), <code>WALK.wallsAt</code> (empty for no walls), <code>WALK.villages</code>, <code>CFG.COVER</code> and <code>CFG.FACE_SHARE</code> (how much each hour's blocks cover, and how fine the streets are), and <code>CFG.PACE</code> (how evenly growth spreads through the hour).</p>
+</main>
+</body>
+</html>
